@@ -13,7 +13,41 @@ tryCatch({
 ```
 ```{r paquetes}
 library(nortest)
+library(dplyr)
+library(janitor)
+library(knitr)
+library(kableExtra)
+library(ggplot2)
+library(corrplot)
+
+
 ```
+## Descripción General del Dataset:
+
+```{r}
+# Tipos de datos
+str(df)
+
+# Primeras filas
+head(df)
+```
+
+##Significado y tipo de cada variable: 
+
+```{r}
+library(knitr)
+
+variables_info <- data.frame(
+  Variable = names(df),
+  Tipo = sapply(df, class),
+  Descripcion = NA
+)
+
+knitr::kable(variables_info, caption = "Variables, tipo y descripción")
+
+
+```
+
 
 ## Exploración de Variables
 
@@ -233,7 +267,21 @@ boxplot(df$año.del.dato,
 lillie.test(df$año.del.dato)
 ```
 
-```{r}
+#relaciones entre variables 
+
+```{r Correlación entre edades de los contrayentes}
+# Filtrar edades válidas sin usar dplyr
+df_edades <- df[df$edadhom >= 18 & df$edadhom <= 100 &
+                  df$edadmuj >= 18 & df$edadmuj <= 100, ]
+
+df_edades <- df_edades[is.finite(df_edades$edadhom) & is.finite(df_edades$edadmuj), ]
+
+ggplot(df_edades, aes(x = edadhom, y = edadmuj)) +
+  geom_point(alpha = 0.3, color = "blue") +
+  geom_smooth(method = "lm", color = "red") +
+  labs(title = "Edad del esposo vs Edad de la esposa",
+       x = "Edad esposo", y = "Edad esposa")
 
 ```
+
 
