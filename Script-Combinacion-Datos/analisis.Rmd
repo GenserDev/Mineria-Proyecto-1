@@ -1,0 +1,239 @@
+---
+title: "Análisis de Categorías"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+
+tryCatch({
+  df <- read.csv("datos_combinados.csv")
+}, error = function(e) {
+  stop("No se encuentra el archivo. Verifica que 'datos_combinados.csv' esté en la misma carpeta que este script.")
+})
+```
+```{r paquetes}
+library(nortest)
+```
+
+## Exploración de Variables
+
+A continuación se presentan las tablas de frecuencia:
+
+```{r analisis, echo=FALSE, results='asis'}
+
+vars <- c("depocu", "grethom", "escohom", "escomuj")
+
+for (col in vars) {
+  if (exists("df") && col %in% names(df)) {
+    
+    cat("\n### Variable:", col, "\n") 
+    
+    frecuencia <- table(df[[col]], useNA = "ifany")
+    porcentaje <- round(prop.table(frecuencia) * 100, 2)
+    
+    resumen <- cbind(Frecuencia = frecuencia, Porcentaje = porcentaje)
+    
+    print(knitr::kable(resumen))
+    cat("\n---\n")
+    
+  } else {
+    cat("\n> **Error:** La variable", col, "no se encontró o el archivo no cargó.\n")
+  }
+}
+```
+
+```{r variables numéricas}
+numericas <- c(
+  "depreg", "mupreg", "mesreg", "añoreg",
+  "diaocu", "mesocu", "añoocu",
+  "mupocu", "edadhom", "edadmuj",
+  "gretmuj", "nachom", "nacmuj",
+  "ocupahom", "ocupamuj", "año.del.dato",
+  "DEPREG", "MUPREG", "MESREG", "AÑOREG",
+  "DIAOCU", "MESOCU", "AÑOOCU",
+  "MUPOCU", "EDADHOM", "EDADMUJ",
+  "PPERMUJ", "NACHOM", "NACMUJ",
+  "ESCHOM", "ESCMUJ", "CIUOHOM", "CIUOMUJ"
+)
+```
+
+
+### Medidas de tendencia central de variables numéricas
+```{r depreg}
+summary(df$depreg)
+mean(df$depreg, na.rm = TRUE)
+quantile(df$depreg, na.rm = TRUE)
+hist(df$depreg,
+     main = "Distribución de depreg",
+     xlab = "depreg",
+     col = "lightgray",
+     breaks = 30)
+boxplot(df$depreg,
+        main = "Boxplot de depreg",
+        ylab = "depreg")
+lillie.test(df$depreg)
+```
+```{r mupreg}
+summary(df$mupreg)
+mean(df$mupreg, na.rm = TRUE)
+quantile(df$mupreg, na.rm = TRUE)
+hist(df$mupreg,
+     main = "Distribución de mupreg",
+     xlab = "mupreg",
+     col = "lightgray",
+     breaks = 30)
+boxplot(df$mupreg,
+        main = "Boxplot de mupreg",
+        ylab = "mupreg")
+
+lillie.test(df$mupreg)
+```
+
+```{r mesreg}
+summary(df$mesreg)
+mean(df$mesreg, na.rm = TRUE)
+quantile(df$mesreg, na.rm = TRUE)
+hist(df$mesreg,
+     main = "Distribución de mesreg",
+     xlab = "mesreg",
+     col = "lightgray",
+     breaks = 12)
+boxplot(df$mesreg,
+        main = "Boxplot de mesreg",
+        ylab = "mesreg")
+lillie.test(df$mesreg)
+```
+
+```{r añoreg}
+summary(df$añoreg)
+mean(df$añoreg, na.rm = TRUE)
+quantile(df$añoreg, na.rm = TRUE)
+hist(df$añoreg,
+     main = "Distribución de añoreg",
+     xlab = "añoreg",
+     col = "lightgray",
+     breaks = 10)
+boxplot(df$añoreg,
+        main = "Boxplot de añoreg",
+        ylab = "añoreg")
+lillie.test(df$añoreg)
+```
+
+```{r diaocu}
+summary(df$diaocu)
+mean(df$diaocu, na.rm = TRUE)
+quantile(df$diaocu, na.rm = TRUE)
+
+hist(df$diaocu,
+     main = "Distribución de diaocu",
+     xlab = "diaocu",
+     col = "lightgray",
+     breaks = 31)
+
+boxplot(df$diaocu,
+        main = "Boxplot de diaocu",
+        ylab = "diaocu")
+
+lillie.test(df$diaocu)
+
+```
+
+```{r mesocu}
+summary(df$mesocu)
+mean(df$mesocu, na.rm = TRUE)
+quantile(df$mesocu, na.rm = TRUE)
+hist(df$mesocu,
+     main = "Distribución de mesocu",
+     xlab = "mesocu",
+     col = "lightgray",
+     breaks = 12)
+boxplot(df$mesocu,
+        main = "Boxplot de mesocu",
+        ylab = "mesocu")
+lillie.test(df$mesocu)
+```
+
+```{r añoocu}
+summary(df$añoocu)
+unique(df$añoocu) #Hay muy pocos valores para calcular normalidad.
+```
+
+```{r edadhom}
+summary(df$edadhom)
+mean(df$edadhom, na.rm = TRUE)
+quantile(df$edadhom, na.rm = TRUE)
+hist(df$edadhom,
+     main = "Distribución de edadhom",
+     xlab = "Edad",
+     col = "lightgray",
+     breaks = 30)
+boxplot(df$edadhom,
+        main = "Boxplot de edadhom",
+        ylab = "Edad")
+lillie.test(df$edadhom)
+```
+
+```{r edadmuj}
+summary(df$edadmuj)
+mean(df$edadmuj, na.rm = TRUE)
+quantile(df$edadmuj, na.rm = TRUE)
+hist(df$edadmuj,
+     main = "Distribución de edadmuj",
+     xlab = "Edad",
+     col = "lightgray",
+     breaks = 30)
+boxplot(df$edadmuj,
+        main = "Boxplot de edadmuj",
+        ylab = "Edad")
+lillie.test(df$edadmuj)
+```
+
+```{r ocupahom}
+summary(df$ocupahom)
+mean(df$ocupahom, na.rm = TRUE)
+quantile(df$ocupahom, na.rm = TRUE)
+hist(df$ocupahom,
+     main = "Distribución de ocupahom",
+     xlab = "ocupahom",
+     col = "lightgray",
+     breaks = 30)
+boxplot(df$ocupahom,
+        main = "Boxplot de ocupahom",
+        ylab = "ocupahom")
+lillie.test(df$ocupahom)
+```
+
+```{r ocupamuj}
+summary(df$ocupamuj)
+mean(df$ocupamuj, na.rm = TRUE)
+quantile(df$ocupamuj, na.rm = TRUE)
+hist(df$ocupamuj,
+     main = "Distribución de ocupamuj",
+     xlab = "ocupamuj",
+     col = "lightgray",
+     breaks = 30)
+boxplot(df$ocupamuj,
+        main = "Boxplot de ocupamuj",
+        ylab = "ocupamuj")
+lillie.test(df$ocupamuj)
+```
+
+```{r año.del.dato}
+summary(df$año.del.dato)
+mean(df$año.del.dato, na.rm = TRUE)
+quantile(df$año.del.dato, na.rm = TRUE)
+hist(df$año.del.dato,
+     main = "Distribución de año.del.dato",
+     xlab = "Año",
+     col = "lightgray",
+     breaks = 10)
+boxplot(df$año.del.dato,
+        main = "Boxplot de año.del.dato",
+        ylab = "Año")
+lillie.test(df$año.del.dato)
+```
+
+```{r}
+
+```
+
