@@ -1,0 +1,44 @@
+---
+title: "Resumen del Dataset"
+author: "Estuardo Castro"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Carga de datos
+
+```{r cargar-datos}
+datos <- read.csv("datos_combinados.csv", stringsAsFactors = FALSE)
+```
+
+## Dimensiones del dataset
+
+```{r dimensiones}
+num_observaciones <- nrow(datos)
+num_variables <- ncol(datos)
+
+num_observaciones
+num_variables
+```
+
+## Resumen general
+
+```{r resumen-texto, echo=FALSE}
+cat("El dataset contiene", num_observaciones, "observaciones y", 
+    num_variables, "variables.")
+```
+
+## Variables del dataset
+
+```{r nombres-variables}
+colnames(datos)
+```
+
+## Vista previa de los datos
+
+```{r vista-previa}
+head(datos)
+```
