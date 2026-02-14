@@ -1,0 +1,111 @@
+---
+title: "Preguntas"
+output: html_document
+date: "2026-02-14"
+---
+
+```{r setup, include=FALSE}
+library(nortest)
+library(dplyr)
+library(janitor)
+library(knitr)
+library(kableExtra)
+library(ggplot2)
+library(corrplot)
+
+# Cargar datos
+tryCatch({
+  df <- read.csv("datos_combinados.csv") %>% clean_names()
+}, error = function(e) {
+  stop("No se encuentra el archivo. Verifica que 'datos_combinados.csv' esté en la misma carpeta que este script.")
+})
+```
+
+##1 Los divorcios se concentran en pocos departamentos
+
+```{r}
+if ("depocu" %in% names(df)) {
+  tab_dep <- as.data.frame(table(df$depocu, useNA="no"))
+  names(tab_dep) <- c("depocu","n")
+  tab_dep <- tab_dep[order(-tab_dep$n), ]
+  tab_dep$pct <- round(100 * tab_dep$n / sum(tab_dep$n), 2)
+  tab_dep$acum_pct <- round(cumsum(tab_dep$pct), 2)
+
+  knitr::kable(head(tab_dep, 10), caption="Top 10 departamentos por divorcios (depocu)")
+
+  plot(tab_dep$acum_pct, type="l", xlab="Ranking de departamentos", ylab="% acumulado",
+       main="% acumulado de divorcios por departamento")
+  abline(h=50, lty=2); abline(h=80, lty=2)
+} else {
+  cat("La columna depocu no existe en el dataset.\n")
+}
+
+```
+
+##2 Hay meses con más divorcios
+
+```{r}
+if ("mesocu" %in% names(df)) {
+  tab_mes <- as.data.frame(table(df$mesocu, useNA="no"))
+  names(tab_mes) <- c("mesocu","n")
+  tab_mes$mesocu <- as.integer(as.character(tab_mes$mesocu))
+
+  ggplot(tab_mes, aes(x=factor(mesocu), y=n)) +
+    geom_col() +
+    labs(title="Divorcios por mes de ocurrencia", x="Mes", y="Número de divorcios")
+} else {
+  cat("La columna mesocu no existe en el dataset.\n")
+}
+
+```
+
+##3 La edad del esposo y la esposa están fuertemente relacionadas 
+
+```{r}
+if (all(c("edadhom","edadmuj") %in% names(df))) {
+  df_ed <- df[df$edadhom >= 18 & df$edadhom <= 100 &
+                df$edadmuj >= 18 & df$edadmuj <= 100, ]
+  df_ed <- df_ed[is.finite(df_ed$edadhom) & is.finite(df_ed$edadmuj), ]
+
+  r <- cor(df_ed$edadhom, df_ed$edadmuj, use="complete.obs")
+  cat("Correlación edadhom-edadmuj:", round(r, 3), "\n\n")
+
+  ggplot(df_ed, aes(x=edadhom, y=edadmuj)) +
+    geom_point(alpha=0.25) +
+    geom_smooth(method="lm") +
+    labs(title="Edad del esposo vs Edad de la esposa", x="Edad esposo", y="Edad esposa")
+}
+
+```
+
+##4 Entre los divorcios, predomina cierto nivel educativo (escohom/escomuj)
+```{r}
+if ("escohom" %in% names(df)) {
+  t1 <- as.data.frame(table(df$escohom, useNA="ifany"))
+  names(t1) <- c("escohom","n")
+  t1$pct <- round(100*t1$n/sum(t1$n), 2)
+  knitr::kable(t1, caption="Distribución educación esposo (escohom)")
+}
+if ("escomuj" %in% names(df)) {
+  t2 <- as.data.frame(table(df$escomuj, useNA="ifany"))
+  names(t2) <- c("escomuj","n")
+  t2$pct <- round(100*t2$n/sum(t2$n), 2)
+  knitr::kable(t2, caption="Distribución educación esposa (escomuj)")
+}
+
+```
+
+
+##5 El registro ocurre cerca del mes de ocurrencia (mesreg ≈ mesocu).
+```{r}
+if (all(c("mesocu","mesreg") %in% names(df))) {
+  iguales <- mean(df$mesocu == df$mesreg, na.rm=TRUE)
+  cat("Proporción mesocu == mesreg:", round(iguales, 3), "\n\n")
+
+  t_mes <- table(df$mesocu, df$mesreg, useNA="no")
+  knitr::kable(as.data.frame.matrix(t_mes),
+               caption="Mes ocurrencia (filas) vs mes registro (columnas)")
+}
+
+```
+
