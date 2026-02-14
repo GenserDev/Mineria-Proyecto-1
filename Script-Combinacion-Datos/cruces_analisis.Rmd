@@ -1,0 +1,20 @@
+---
+title: "Cruce de Variables: Elementos Clave en los Divorcios"
+author: "Genser"
+date: "2026-02-14""
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+
+# Cargar librerías necesarias
+library(dplyr)
+library(ggplot2)
+library(janitor)
+library(knitr)
+library(tidyr)
