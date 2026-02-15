@@ -1,12 +1,13 @@
 ---
-title: "Cruce de Variables: Elementos Clave en los Divorcios"
-author: "Genser"
-date: "2026-02-14""
-output: 
+title: 'Cruce de Variables: Elementos Clave en los Divorcios'
+author: "Tu Nombre"
+date: "`r Sys.Date()`"
+output:
   html_document:
     toc: true
-    toc_float: true
-    theme: flatly
+    df_print: paged
+  pdf_document:
+    toc: true
 ---
 
 ```{r setup, include=FALSE}
@@ -18,3 +19,104 @@ library(ggplot2)
 library(janitor)
 library(knitr)
 library(tidyr)
+```
+
+```{r}
+# Cargar datos y estandarizar nombres de columnas
+df <- read.csv("datos_combinados.csv", stringsAsFactors = FALSE) %>% clean_names()
+
+# Limpieza básica: Filtrar valores atípicos o ignorados (999 en edad, 99 en escolaridad)
+df_clean <- df %>%
+  filter(!is.na(edadhom) & !is.na(edadmuj) & edadhom < 100 & edadmuj < 100) %>%
+  filter(!is.na(escohom) & !is.na(escomuj) & escohom < 90 & escomuj < 90)
+
+# Crear una variable para la diferencia de edad
+df_clean <- df_clean %>%
+  mutate(diferencia_edad = edadhom - edadmuj,
+         rango_diferencia = case_when(
+           diferencia_edad > 10 ~ "Hombre mayor por >10 años",
+           diferencia_edad > 3 & diferencia_edad <= 10 ~ "Hombre mayor (4-10 años)",
+           abs(diferencia_edad) <= 3 ~ "Edades similares (+/- 3 años)",
+           diferencia_edad < -3 & diferencia_edad >= -10 ~ "Mujer mayor (4-10 años)",
+           diferencia_edad < -10 ~ "Mujer mayor por >10 años"
+         ))
+
+# Asegurar orden lógico de los factores
+df_clean$rango_diferencia <- factor(df_clean$rango_diferencia, 
+                                    levels = c("Mujer mayor por >10 años", 
+                                               "Mujer mayor (4-10 años)", 
+                                               "Edades similares (+/- 3 años)", 
+                                               "Hombre mayor (4-10 años)", 
+                                               "Hombre mayor por >10 años"))
+```
+
+//Cruce 1: Brecha de Edades (Edad Hombre vs Edad Mujer)
+```{r}
+# Tabla de frecuencias de la brecha de edad
+tabla_edades <- df_clean %>%
+  count(rango_diferencia) %>%
+  mutate(Porcentaje = round(n / sum(n) * 100, 2))
+
+kable(tabla_edades, caption = "Distribución de los Divorcios según Brecha de Edad")
+
+# Gráfico de barras
+ggplot(tabla_edades, aes(x = rango_diferencia, y = Porcentaje, fill = rango_diferencia)) +
+  geom_bar(stat = "identity", show.legend = FALSE) +
+  geom_text(aes(label = paste0(Porcentaje, "%")), vjust = -0.5) +
+  labs(title = "Brecha de Edad en los Matrimonios Disueltos",
+       x = "Diferencia de Edad",
+       y = "Porcentaje de Divorcios (%)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+// Cruce 2: Asimetría Educativa (Escolaridad Hombre vs Mujer)
+```{r}
+# Crear una matriz cruzada de escolaridad (usaremos proporciones)
+tabla_esco <- table(df_clean$escohom, df_clean$escomuj)
+
+# Para visualizar mejor, creamos una categorización simple:
+# ¿Tienen el mismo nivel educativo?
+df_clean <- df_clean %>%
+  mutate(asimetria_edu = case_when(
+    escohom == escomuj ~ "Mismo Nivel Educativo",
+    escohom > escomuj ~ "Hombre tiene mayor escolaridad",
+    escohom < escomuj ~ "Mujer tiene mayor escolaridad"
+  ))
+
+tabla_asimetria <- df_clean %>%
+  count(asimetria_edu) %>%
+  mutate(Porcentaje = round(n / sum(n) * 100, 2))
+
+kable(tabla_asimetria, caption = "Asimetría Educativa entre Cónyuges")
+
+# Gráfico
+ggplot(tabla_asimetria, aes(x = "", y = Porcentaje, fill = asimetria_edu)) +
+  geom_bar(stat = "identity", width = 1) +
+  coord_polar("y", start = 0) +
+  geom_text(aes(label = paste0(Porcentaje, "%")), position = position_stack(vjust = 0.5)) +
+  labs(title = "Comparación de Nivel Educativo en Cónyuges Divorciados",
+       fill = "Situación Educativa") +
+  theme_void()
+```
+
+//Cruce 3: Educación Femenina vs. Edad al Divorciarse
+```{r}
+# Mapeo rápido de niveles educativos comunes (Ajustar según catálogo INE si es necesario)
+# Asumiendo: 1=Ninguno, 2=Primaria, 3=Básico, 4=Diversificado, 5=Universitario
+df_clean_edu <- df_clean %>%
+  filter(escomuj <= 5) %>%
+  mutate(nivel_edu_muj = factor(escomuj, 
+                                levels = c(1, 2, 3, 4, 5), 
+                                labels = c("Ninguno", "Primaria", "Básico", "Diversificado", "Universitario")))
+
+ggplot(df_clean_edu, aes(x = nivel_edu_muj, y = edadmuj, fill = nivel_edu_muj)) +
+  geom_boxplot(show.legend = FALSE, alpha = 0.7) +
+  labs(title = "Edad de la Mujer al Divorciarse según su Nivel Educativo",
+       x = "Nivel Educativo de la Mujer",
+       y = "Edad al Divorcio") +
+  theme_minimal()
+```
+
+
+
