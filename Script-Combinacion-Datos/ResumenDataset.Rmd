@@ -42,3 +42,58 @@ colnames(datos)
 ```{r vista-previa}
 head(datos)
 ```
+
+## Librerías y más
+```{r librerias}
+library(ggplot2)
+
+datos_limpios <- datos[datos$edadhom < 120 & datos$edadmuj < 120, ]
+```
+
+##Histograma y prueba de normalidad
+```{r histograma}
+# Histograma con curva de densidad normal
+ggplot(datos_limpios, aes(x = edadhom)) +
+  geom_histogram(aes(y = ..density..), bins = 30, fill = "#69b3a2", color = "white") +
+  stat_function(fun = dnorm, args = list(mean = mean(datos_limpios$edadhom, na.rm=T), 
+                                         sd = sd(datos_limpios$edadhom, na.rm=T)), 
+                color = "red", size = 1) +
+  labs(title = "Distribución de Edad del Hombre",
+       subtitle = "La línea roja representa una distribución normal teórica",
+       x = "Edad", y = "Densidad") +
+  theme_minimal()
+```
+
+## Cajas y bigotes
+```{r cajas-bigotes}
+
+ggplot(datos_limpios, aes(x = as.factor(depocu), y = edadhom, fill = as.factor(depocu))) +
+  geom_boxplot(outlier.color = "red", outlier.shape = 16) +
+  labs(title = "Detección de Outliers: Edad por Departamento",
+       x = "Código de Departamento (INE)", y = "Edad del Hombre") +
+  theme_minimal() +
+  theme(legend.position = "none") 
+```
+
+## Grafíco de dispersión y de barras
+## Grafíco de dispersión y de barras
+```{r dispersion-barras}
+library(dplyr) 
+
+# 1. Gráfico de dispersión (Edad Hombre vs Edad Mujer)
+ggplot(datos_limpios, aes(x = edadhom, y = edadmuj)) +
+  geom_point(alpha = 0.2, color = "darkblue") + 
+  geom_smooth(method = "lm", color = "orange") + 
+  labs(title = "Correlación entre Edades",
+       x = "Edad del Hombre", y = "Edad de la Mujer") +
+  theme_light()
+
+
+datos_limpios %>%
+  filter(!is.na(mesocu)) %>% 
+  ggplot(aes(x = as.factor(mesocu))) +
+    geom_bar(fill = "steelblue") +
+    labs(title = "Frecuencia de Registros por Mes (Datos declarados)",
+         x = "Mes (1-12)", y = "Cantidad de Registros") +
+    theme_minimal()
+```
