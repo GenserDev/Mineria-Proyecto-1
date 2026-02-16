@@ -78,34 +78,38 @@ if (all(c("edadhom","edadmuj") %in% names(df))) {
 
 ```
 
-##4 Entre los divorcios, predomina cierto nivel educativo (escohom/escomuj)
+
+##5  En 2012–2021 hubo cambios (sube o baja el número de divorcios por año) 
+
 ```{r}
-if ("escohom" %in% names(df)) {
-  t1 <- as.data.frame(table(df$escohom, useNA="ifany"))
-  names(t1) <- c("escohom","n")
-  t1$pct <- round(100*t1$n/sum(t1$n), 2)
-  knitr::kable(t1, caption="Distribución educación esposo (escohom)")
-}
-if ("escomuj" %in% names(df)) {
-  t2 <- as.data.frame(table(df$escomuj, useNA="ifany"))
-  names(t2) <- c("escomuj","n")
-  t2$pct <- round(100*t2$n/sum(t2$n), 2)
-  knitr::kable(t2, caption="Distribución educación esposa (escomuj)")
+# Si usaste clean_names(): ano_del_dato
+if ("ano_del_dato" %in% names(df)) {
+  tab_anio <- as.data.frame(table(df$ano_del_dato, useNA="no"))
+  names(tab_anio) <- c("anio","n")
+  tab_anio$anio <- as.integer(as.character(tab_anio$anio))
+
+  ggplot(tab_anio, aes(x=anio, y=n)) +
+    geom_line() + geom_point() +
+    labs(title="Divorcios por año (2012–2021)", x="Año", y="Número de divorcios")
 }
 
 ```
 
 
-##5 El registro ocurre cerca del mes de ocurrencia (mesreg ≈ mesocu).
-```{r}
-if (all(c("mesocu","mesreg") %in% names(df))) {
-  iguales <- mean(df$mesocu == df$mesreg, na.rm=TRUE)
-  cat("Proporción mesocu == mesreg:", round(iguales, 3), "\n\n")
+##4 ¿Hay “acumulación” en ciertos rangos de edad? 
 
-  t_mes <- table(df$mesocu, df$mesreg, useNA="no")
-  knitr::kable(as.data.frame.matrix(t_mes),
-               caption="Mes ocurrencia (filas) vs mes registro (columnas)")
-}
+```{r}
+df_ed <- df[df$edadhom >= 18 & df$edadhom <= 100, ]
+df_ed$grupo_edad_h <- cut(df_ed$edadhom,
+                          breaks=c(18,25,35,45,55,65,100),
+                          right=FALSE)
+
+tab_age <- as.data.frame(table(df_ed$grupo_edad_h))
+names(tab_age) <- c("grupo_edad","n")
+
+ggplot(tab_age, aes(x=grupo_edad, y=n)) +
+  geom_col() +
+  labs(title="Divorcios por rango de edad (esposo)", x="Rango de edad", y="Casos") +
+  theme(axis.text.x = element_text(angle=45, hjust=1))
 
 ```
-
