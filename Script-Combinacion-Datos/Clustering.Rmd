@@ -1,0 +1,100 @@
+---
+title: "Preparando datos para clustering"
+output: html_notebook
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(janitor)
+library(cluster)
+library(factoextra)
+library(NbClust)
+library(hopkins)
+library(mclust)
+```
+
+```{r cargar datos y filtrar edad y escolaridad}
+df <- read.csv("datos_combinados.csv", stringsAsFactors = FALSE) %>% clean_names()
+#Filtrar edades y escolaridad válidas
+df_clean <- df %>%
+  filter(!is.na(edadhom) & !is.na(edadmuj) & edadhom < 100 & edadmuj < 100) %>%
+  filter(!is.na(escohom) & !is.na(escomuj) & escohom < 90 & escomuj < 90)
+```
+
+
+```{r crear variables de diferencia y promedio de edad}
+df_clean <- df_clean %>%
+  mutate(
+    dif_edad = edadhom - edadmuj,
+    dif_edad_abs = abs(dif_edad),
+    edad_prom = (edadhom + edadmuj)/2
+  )
+```
+
+```{r seleccionar variables numéricas para clustering}
+df_cluster <- df_clean %>%
+  select(edadhom, edadmuj, dif_edad_abs, edad_prom)
+
+summary(df_cluster)
+
+```
+
+```{r eliminar filas con NA}
+df_cluster <- df_cluster[complete.cases(df_cluster),]
+```
+
+```{r escalar variables para clustering}
+df_cluster_escalado <- scale(df_cluster)
+summary(df_cluster_escalado)
+```
+
+# Clstering
+
+```{r semilla y test de hopkins}
+set.seed(123)
+hopkins(df_cluster_escalado)
+```
+
+```{r  método del codo}
+fviz_nbclust(df_cluster_escalado, kmeans, method = "wss")
+```
+
+```{r siuleta}
+fviz_nbclust(df_cluster_escalado, kmeans, method = "silhouette")
+```
+
+```{r gap}
+fviz_nbclust(df_cluster_escalado, kmeans, method = "gap_stat", nboot = 50, iter.max = 100, nstart = 25)
+```
+
+```{r clusters siguiendo sugerencia de silueta vs gap}
+kmgap <- kmeans(df_cluster_escalado, centers = 2, nstart = 25) #gap
+kmsil <- kmeans(df_cluster_escalado, centers = 3, nstart = 25) #silueta
+```
+
+```{r comparar silueta vs gap}
+silkmgap <- silhouette(kmgap$cluster, dist(df_cluster_escalado))
+silkmsil <- silhouette(kmsil$cluster, dist(df_cluster_escalado))
+mean(silkmgap[,3])
+mean(silkmsil[,3])
+```
+La diferencia es muy pequeña, analizamos las medias para decidir cual usar.
+
+```{r comparación de agrupación en 2 clusters vs 3 clusters}
+aggregate(df_cluster, by=list(cluster=kmgap$cluster), mean)
+aggregate(df_cluster, by=list(cluster=kmsil$cluster), mean)
+```
+
+Podemos tener una mejor información con 3 clusters:
+cluster 1: Divorcios con brecha de edad grande
+cluster 2: Divorcios con edad madura
+cluster 3: Divorcios jóvenes.
+
+```{r silueta}
+plot(sil)
+```
+```{r proporciones en los clusters}
+table(kmsil$cluster)
+```
+
