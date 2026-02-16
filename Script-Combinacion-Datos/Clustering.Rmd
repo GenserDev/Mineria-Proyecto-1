@@ -87,9 +87,9 @@ aggregate(df_cluster, by=list(cluster=kmsil$cluster), mean)
 ```
 
 Podemos tener una mejor información con 3 clusters:
-cluster 1: Divorcios con brecha de edad grande
+cluster 1: Divorcios jóvenes.
 cluster 2: Divorcios con edad madura
-cluster 3: Divorcios jóvenes.
+cluster 3: divorcios en edad madura.
 
 ```{r silueta}
 plot(sil)
