@@ -1,0 +1,227 @@
+---
+title: "Variables"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+
+tryCatch({
+  df <- read.csv("datos_combinados.csv")
+}, error = function(e) {
+  stop("No se encuentra el archivo. Verifica que 'datos_combinados.csv' esté en la misma carpeta que este script.")
+})
+```
+
+## Separar por tipos de variables
+
+```{r tipos de variables}
+vars_numericas <- c(
+  "edadhom", "edadmuj",
+  "mesreg", "mesocu",
+  "añoreg", "añoocu",
+  "diaocu"
+)
+
+vars_categoricas <- c(
+  "depreg", "depocu",
+  "mupreg", "mupocu",
+  "grethom", "gretmuj",
+  "nachom", "nacmuj",
+  "escohom", "escomuj",
+  "ocupahom", "ocupamuj"
+)
+```
+
+## Limpiar 999 por NA
+
+```{r Limpieza datos}
+df[df == 999] <- NA
+```
+
+## Resumen variables numéricas
+
+```{r Numéricas}
+
+library(dplyr)
+
+for (var in vars_numericas) {
+  
+  cat("====================================\n")
+  cat("Variable:", var, "\n")
+  cat("====================================\n")
+  
+  print(summary(df[[var]]))
+  
+  cat("\nDesviación estándar:\n")
+  print(sd(df[[var]], na.rm = TRUE))
+  
+  hist(df[[var]],
+       main = paste("Histograma de", var),
+       xlab = var)
+  
+  datos <- na.omit(df[[var]])
+  
+  if(length(datos) > 3 && length(datos) < 5000){
+    cat("\nShapiro-Wilk Test:\n")
+    print(shapiro.test(datos))
+  }
+  
+  cat("\n\n")
+}
+
+```
+
+## Determinar distribución
+
+```{r Distribución}
+
+detectar_distribucion <- function(x, nombre_var = "Variable") {
+  
+  x <- na.omit(x)
+  
+  cat("\n====================================\n")
+  cat("Variable:", nombre_var, "\n")
+  cat("====================================\n")
+  
+  # Datos básicos
+  media <- mean(x)
+  mediana <- median(x)
+  sd_val <- sd(x)
+  
+  cat("Media:", round(media,2), "\n")
+  cat("Mediana:", round(mediana,2), "\n")
+  cat("Desv. Est:", round(sd_val,2), "\n\n")
+  
+  # Normalidad
+  if(length(x) >= 3 && length(x) <= 5000){
+    test <- shapiro.test(x)
+    pvalor <- test$p.value
+    
+    cat("Shapiro p-value:", pvalor, "\n\n")
+    
+    if(!is.na(pvalor) && pvalor > 0.05){
+      cat("✅ DISTRIBUCIÓN NORMAL\n")
+      return("Normal")
+    }
+  }
+  
+  # Detectar uniforme
+  if(length(unique(x)) <= 50){
+    conteos <- table(x)
+    
+    if(mean(conteos) > 0){
+      ratio <- sd(conteos)/mean(conteos)
+      
+      if(!is.na(ratio) && ratio < 0.5){
+        cat("➡ DISTRIBUCIÓN DISCRETA UNIFORME\n")
+        return("Uniforme")
+      }
+    }
+  }
+  
+  # Sesgo
+  sesgo <- mean((x - media)^3) / sd_val^3
+  
+  if(!is.na(sesgo)){
+    if(sesgo > 1){
+      cat("➡ SESGADA A LA DERECHA\n")
+      return("Sesgada derecha")
+      
+    } else if(sesgo < -1){
+      cat("➡ SESGADA A LA IZQUIERDA\n")
+      return("Sesgada izquierda")
+    }
+  }
+  
+  cat("➡ ASIMÉTRICA NO NORMAL\n")
+  return("Asimétrica")
+}
+
+resultados <- list()
+
+for(var in vars_numericas){
+  tipo <- detectar_distribucion(df[[var]], var)
+  resultados[[var]] <- tipo
+}
+
+cat("\n\n====================================\n")
+cat("RESUMEN DE DISTRIBUCIONES\n")
+cat("====================================\n\n")
+
+tipos_unicos <- unique(unlist(resultados))
+
+for(tipo in tipos_unicos){
+  cat(tipo, ":\n")
+  
+  vars <- names(resultados)[unlist(resultados) == tipo]
+  
+  for(v in vars){
+    cat(" -", v, "\n")
+  }
+  
+  cat("\n")
+}
+```
+
+
+## Resumen variables categóricas
+
+```{r categóricas}
+library(ggplot2)
+library(dplyr)
+library(forcats)
+
+for (var in vars_categoricas) {
+  
+  cat("====================================\n")
+  cat("Variable:", var, "\n")
+  cat("====================================\n")
+  
+  # Crear tabla
+  df_plot <- df %>%
+    count(.data[[var]], name = "Frecuencia") %>%
+    rename(Categoria = !!var)
+  
+  # Quitar NA
+  df_plot <- df_plot %>% filter(!is.na(Categoria))
+  
+  # Agrupar categorías pequeñas (menos del 1% del total)
+  total <- sum(df_plot$Frecuencia)
+  
+  df_plot <- df_plot %>%
+    mutate(
+      Categoria = ifelse(
+        Frecuencia / total < 0.0043,
+        "Otros",
+        as.character(Categoria)
+      )
+    ) %>%
+    group_by(Categoria) %>%
+    summarise(Frecuencia = sum(Frecuencia), .groups = "drop")
+  
+  # Ordenar
+  df_plot <- df_plot %>%
+    arrange(desc(Frecuencia)) %>%
+    mutate(Categoria = factor(Categoria, levels = Categoria))
+  
+  # Mostrar tabla
+  print(df_plot)
+  
+  # Gráfica
+  print(
+    ggplot(df_plot, aes(x = Categoria, y = Frecuencia)) +
+      geom_bar(stat = "identity", fill = "#2C7FB8") +
+      geom_text(aes(label = Frecuencia), vjust = -0.3, size = 3) +
+      labs(
+        title = paste("Distribución de", var),
+        x = "Categoría",
+        y = "Frecuencia"
+      ) +
+      theme_minimal() +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  )
+  
+  cat("\n\n")
+}
+```
+
