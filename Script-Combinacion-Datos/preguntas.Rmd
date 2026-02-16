@@ -79,37 +79,78 @@ if (all(c("edadhom","edadmuj") %in% names(df))) {
 ```
 
 
-##5  En 2012–2021 hubo cambios (sube o baja el número de divorcios por año) 
+##4
+```{r}
+df_h <- df[df$edadhom >= 18 & df$edadhom <= 100, ]
+df_h$rango_h <- cut(df_h$edadhom, breaks=c(18,25,35,45,55,65,100), right=FALSE)
+
+df_m <- df[df$edadmuj >= 18 & df$edadmuj <= 100, ]
+df_m$rango_m <- cut(df_m$edadmuj, breaks=c(18,25,35,45,55,65,100), right=FALSE)
+
+tab_h <- as.data.frame(table(df_h$rango_h)); names(tab_h) <- c("rango","n"); tab_h$grupo <- "Esposo"
+tab_m <- as.data.frame(table(df_m$rango_m)); names(tab_m) <- c("rango","n"); tab_m$grupo <- "Esposa"
+
+tab <- rbind(tab_h, tab_m)
+
+ggplot(tab, aes(x=rango, y=n, fill=grupo)) +
+  geom_col(position="dodge") +
+  labs(title="Divorcios por rango de edad: esposo vs esposa", x="Rango de edad", y="Casos")
+
+```
+
+## apoyo 3
+```{r}
+df_ed <- df[df$edadhom >= 18 & df$edadhom <= 100 &
+              df$edadmuj >= 18 & df$edadmuj <= 100, ]
+
+df_ed$dif_edad <- abs(df_ed$edadhom - df_ed$edadmuj)
+
+hist(df_ed$dif_edad, breaks=30, col="lightgray",
+     main="Diferencia de edad |esposo - esposa|", xlab="Años")
+
+cat("Proporción dif<=5:", round(mean(df_ed$dif_edad <= 5, na.rm=TRUE), 3), "\n")
+cat("Proporción dif<=10:", round(mean(df_ed$dif_edad <= 10, na.rm=TRUE), 3), "\n")
+
+```
+
+
+##5
 
 ```{r}
-# Si usaste clean_names(): ano_del_dato
-if ("ano_del_dato" %in% names(df)) {
-  tab_anio <- as.data.frame(table(df$ano_del_dato, useNA="no"))
-  names(tab_anio) <- c("anio","n")
-  tab_anio$anio <- as.integer(as.character(tab_anio$anio))
+## B) ¿Quién es mayor con más frecuencia?
+# Supuesto: edadhom > edadmuj en la mayoría de casos
 
-  ggplot(tab_anio, aes(x=anio, y=n)) +
-    geom_line() + geom_point() +
-    labs(title="Divorcios por año (2012–2021)", x="Año", y="Número de divorcios")
+if (all(c("edadhom","edadmuj") %in% names(df))) {
+
+  # Filtrar edades válidas (evita 999 y valores raros)
+  df_ed <- df[df$edadhom >= 18 & df$edadhom <= 100 &
+                df$edadmuj >= 18 & df$edadmuj <= 100, ]
+  df_ed <- df_ed[is.finite(df_ed$edadhom) & is.finite(df_ed$edadmuj), ]
+
+  # Clasificación de comparación
+  df_ed$quien_mayor <- ifelse(df_ed$edadhom > df_ed$edadmuj, "Esposo mayor",
+                        ifelse(df_ed$edadhom < df_ed$edadmuj, "Esposa mayor",
+                               "Misma edad"))
+
+  # Tabla de frecuencias y porcentajes
+  tab <- as.data.frame(table(df_ed$quien_mayor))
+  names(tab) <- c("Categoria","n")
+  tab$pct <- round(100 * tab$n / sum(tab$n), 2)
+
+  knitr::kable(tab, caption="¿Quién es mayor con más frecuencia? (edades válidas)")
+
+  # Grafica de barras:
+  
+  ggplot(tab, aes(x = reorder(Categoria, -n), y = n, fill = Categoria)) +
+  geom_col(width = 0.7, alpha = 0.95, show.legend = FALSE) +
+  scale_fill_brewer(palette = "Set2") +
+  labs(title = "¿Quién es mayor con más frecuencia en los divorcios?",
+       x = "Categoría", y = "Casos") +
+  theme_minimal(base_size = 12) +
+  theme(plot.title = element_text(face = "bold"))
+
 }
 
 ```
 
 
-##4 ¿Hay “acumulación” en ciertos rangos de edad? 
-
-```{r}
-df_ed <- df[df$edadhom >= 18 & df$edadhom <= 100, ]
-df_ed$grupo_edad_h <- cut(df_ed$edadhom,
-                          breaks=c(18,25,35,45,55,65,100),
-                          right=FALSE)
-
-tab_age <- as.data.frame(table(df_ed$grupo_edad_h))
-names(tab_age) <- c("grupo_edad","n")
-
-ggplot(tab_age, aes(x=grupo_edad, y=n)) +
-  geom_col() +
-  labs(title="Divorcios por rango de edad (esposo)", x="Rango de edad", y="Casos") +
-  theme(axis.text.x = element_text(angle=45, hjust=1))
-
-```
