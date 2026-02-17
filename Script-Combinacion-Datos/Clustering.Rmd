@@ -1,6 +1,8 @@
 ---
 title: "Preparando datos para clustering"
-output: html_notebook
+output:
+  html_document:
+    df_print: paged
 ---
 
 ```{r setup, include=FALSE}
@@ -91,10 +93,21 @@ cluster 1: Divorcios jóvenes.
 cluster 2: Divorcios con edad madura
 cluster 3: divorcios en edad madura.
 
-```{r silueta}
-plot(sil)
+```{r silueta-final-corregida}
+# 1. Gráfica de Silueta (Corregida)
+
+fviz_silhouette(silkmsil, palette = "jco", print.summary = FALSE) +
+  labs(title = "Calidad del Agrupamiento (Silueta) - Modelo Final")
 ```
 ```{r proporciones en los clusters}
 table(kmsil$cluster)
 ```
 
+```{r mapa-clusters-final}
+fviz_cluster(kmsil, data = df_cluster_escalado,
+             geom = "point",
+             ellipse.type = "convex", 
+             palette = "jco",
+             ggtheme = theme_minimal(),
+             main = "Mapa Final de Clusters")
+```
