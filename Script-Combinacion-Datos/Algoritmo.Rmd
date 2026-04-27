@@ -262,3 +262,39 @@ g_comp <- ggplot(comp_df, aes(x = Modelo, y = Accuracy, fill = Modelo)) +
 print(g_comp)
 ```
 
+```{r inciso 4}
+# 1. Definir el control de entrenamiento (Validación Cruzada 5-fold)
+ctrl_tune <- trainControl(method = "cv", number = 5)
+
+# 2. Crear la rejilla de parámetros (Grid Search)
+# Probaremos 5 modelos distintos variando el parámetro 'mtry'
+grid_rf <- expand.grid(mtry = c(2, 5, 10, 15, 20))
+
+cat("\nEntrenando multiples modelos Random Forest para encontrar el mejor ajuste...\n")
+
+# 3. Entrenar los modelos
+# Nota: Usamos el set 'train', no 'df_clean', para evaluar correctamente
+rf_tuneado <- train(
+  formula_rf,
+  data      = train, 
+  method    = "rf",
+  trControl = ctrl_tune,
+  tuneGrid  = grid_rf,
+  ntree     = 200 # Mantenemos 200 árboles para que no tarde demasiado
+)
+
+# 4. Mostrar los resultados de los 5 modelos
+cat("\n=== Resultados de la Búsqueda del Mejor Modelo ===\n")
+print(rf_tuneado)
+
+# 5. Gráfica para justificar la elección (Complejidad vs Accuracy)
+ggplot(rf_tuneado) + 
+  theme_minimal(base_size = 11) +
+  labs(title = "Rendimiento del Modelo según el parámetro 'mtry'",
+       x = "Cantidad de variables aleatorias por división (mtry)",
+       y = "Accuracy (Precisión en Validación Cruzada)")
+
+# 6. Extraer el mejor modelo final
+modelo_final <- rf_tuneado$finalModel
+cat("\nEl mejor parámetro encontrado fue mtry =", rf_tuneado$bestTune$mtry, "\n")
+```
