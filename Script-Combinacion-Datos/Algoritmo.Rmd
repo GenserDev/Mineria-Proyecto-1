@@ -1,0 +1,264 @@
+---
+title: "Algoritmo"
+output: html_document
+date: "2026-04-27"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(readr)
+library(randomForest)
+library(caret)
+library(ggplot2)
+library(tidyr)
+```
+
+```{r}
+set.seed(42)
+
+```
+
+```{r}
+df <- read_csv("datos_combinados.csv", show_col_types = FALSE)
+cat("Filas originales:", nrow(df), " | Columnas:", ncol(df), "\n")
+```
+```{r}
+upper_cols <- c("DEPREG","MUPREG","MESREG","AÑOREG","DIAOCU","MESOCU","AÑOOCU",
+                "DEPOCU","MUPOCU","EDADHOM","EDADMUJ","PPERHOM","PPERMUJ",
+                "NACHOM","NACMUJ","ESCHOM","ESCMUJ","CIUOHOM","CIUOMUJ")
+lower_cols <- c("depreg","mupreg","mesreg","añoreg","diaocu","mesocu","añoocu",
+                "depocu","mupocu","edadhom","edadmuj","grethom","gretmuj",
+                "nachom","nacmuj","escohom","escomuj","ocupahom","ocupamuj")
+ 
+for (i in seq_along(upper_cols)) {
+  l <- lower_cols[i]; u <- upper_cols[i]
+  df[[l]] <- ifelse(is.na(df[[l]]), df[[u]], df[[l]])
+}
+df <- df %>% select(all_of(c(lower_cols, "año del dato")))
+cat("Despues de unificar:", nrow(df), "x", ncol(df), "\n")
+```
+
+```{r}
+# Edades: 999 es codigo de "ignorado"; aplicamos rangos validos.
+# Educacion: 9 es "ignorado". Como la variable respuesta se construye desde
+# escohom/escomuj, mantener 9 introducira clasificaciones ficticias.
+df_clean <- df %>%
+  filter(edadhom < 100, edadmuj < 100,
+         edadhom >= 18, edadmuj >= 14,
+         escohom != 9, escomuj != 9)
+cat("Despues de filtrado:", nrow(df_clean), "registros\n")
+```
+
+```{r Variables de respuesta}
+df_clean <- df_clean %>%
+  mutate(nivel_edu_pareja = case_when(
+    escohom == escomuj ~ "Educacion_similar",
+    escohom >  escomuj ~ "Esposo_mas_educado",
+    escohom <  escomuj ~ "Esposa_mas_educada"
+  ),
+  nivel_edu_pareja = factor(nivel_edu_pareja))
+ 
+cat("\nDistribucion de la variable respuesta:\n")
+print(table(df_clean$nivel_edu_pareja))
+cat("\nPorcentajes:\n")
+print(round(prop.table(table(df_clean$nivel_edu_pareja)) * 100, 2))
+```
+```{r Ingenería de estadísticas}
+df_clean <- df_clean %>%
+  mutate(
+    dif_edad     = edadhom - edadmuj,
+    dif_edad_abs = abs(dif_edad),
+    edad_prom    = (edadhom + edadmuj) / 2,
+    esposo_mayor = as.integer(edadhom > edadmuj),
+    edad_min     = pmin(edadhom, edadmuj),
+    edad_max     = pmax(edadhom, edadmuj)
+  )
+```
+
+```{r Seleccion de predictoras (sin data leakage)}
+features_num <- c("edadhom","edadmuj","dif_edad","dif_edad_abs","edad_prom",
+                  "esposo_mayor","edad_min","edad_max",
+                  "mesreg","mesocu","diaocu","añoreg","añoocu","año del dato")
+features_cat <- c("depreg","depocu","grethom","gretmuj",
+                  "nachom","nacmuj","ocupahom","ocupamuj")
+```
+
+```{r Tratamiento de NAs y conversion a factor}
+for (col in features_cat) {
+  df_clean[[col]] <- as.character(df_clean[[col]])
+  df_clean[[col]][is.na(df_clean[[col]])] <- "desconocido"
+  df_clean[[col]] <- as.factor(df_clean[[col]])
+}
+for (col in features_num) {
+  if (any(is.na(df_clean[[col]]))) {
+    df_clean[[col]][is.na(df_clean[[col]])] <- median(df_clean[[col]], na.rm = TRUE)
+  }
+}
+ 
+# randomForest tiene un limite de 53 niveles por factor. Para variables con
+# muchas categorias (ocupahom, mupocu, mupreg) agrupamos las menos frecuentes
+# en "Otros". Nos quedamos con las top 50 mas frecuentes por variable.
+collapse_levels <- function(x, top_n = 50) {
+  freqs <- sort(table(x), decreasing = TRUE)
+  keep  <- names(freqs)[seq_len(min(top_n, length(freqs)))]
+  x <- as.character(x)
+  x[!x %in% keep] <- "Otros"
+  factor(x)
+}
+for (col in features_cat) {
+  if (nlevels(df_clean[[col]]) > 50) {
+    df_clean[[col]] <- collapse_levels(df_clean[[col]], top_n = 50)
+  }
+}
+ 
+# Renombrar la columna con espacio porque randomForest no la acepta
+df_clean <- df_clean %>% rename(ano_dato = `año del dato`,
+                                anoreg   = `añoreg`,
+                                anoocu   = `añoocu`)
+features_num <- gsub("año del dato", "ano_dato", features_num)
+features_num <- gsub("añoreg", "anoreg", features_num)
+features_num <- gsub("añoocu", "anoocu", features_num)
+ 
+predictoras <- c(features_num, features_cat)
+cat("\nNumero de predictoras:", length(predictoras), "\n")
+```
+
+```{r Split train/test}
+idx <- createDataPartition(df_clean$nivel_edu_pareja, p = 0.8, list = FALSE)
+train <- df_clean[idx, ]
+test  <- df_clean[-idx, ]
+cat("Train:", nrow(train), " | Test:", nrow(test), "\n")
+ 
+```
+```{r Balseline}
+clase_mayoritaria <- names(sort(table(train$nivel_edu_pareja), decreasing = TRUE))[1]
+acc_baseline <- mean(test$nivel_edu_pareja == clase_mayoritaria)
+cat(sprintf("\nBaseline (predecir siempre '%s'): %.4f\n",
+            clase_mayoritaria, acc_baseline))
+ 
+```
+```{r Random Forest con class weights balanceados}
+# classwt compensa el desbalance: a la clase mayoritaria se le da menor peso.
+freqs <- table(train$nivel_edu_pareja)
+classwt <- as.numeric(1 / freqs)
+classwt <- classwt / sum(classwt)
+names(classwt) <- names(freqs)
+ 
+formula_rf <- as.formula(paste("nivel_edu_pareja ~",
+                               paste(predictoras, collapse = " + ")))
+ 
+cat("\nEntrenando Random Forest...\n")
+rf_modelo <- randomForest(
+  formula_rf,
+  data       = train,
+  ntree      = 300,
+  mtry       = floor(sqrt(length(predictoras))),  # ~5
+  nodesize   = 5,
+  classwt    = classwt,
+  importance = TRUE
+)
+print(rf_modelo)
+```
+
+```{r  Evaluacion en test}
+pred_test  <- predict(rf_modelo, newdata = test)
+pred_train <- predict(rf_modelo, newdata = train)
+acc_train  <- mean(pred_train == train$nivel_edu_pareja)
+acc_test   <- mean(pred_test  == test$nivel_edu_pareja)
+ 
+cat(sprintf("\nAccuracy train: %.4f\n", acc_train))
+cat(sprintf("Accuracy test:  %.4f\n", acc_test))
+ 
+cm <- confusionMatrix(pred_test, test$nivel_edu_pareja)
+cat("\n=== Matriz de confusion (test) ===\n")
+print(cm$table)
+cat("\n=== Metricas por clase ===\n")
+print(round(cm$byClass[, c("Precision","Recall","F1")], 4))
+```
+```{r Validacion cruzada 5-fold}
+
+cat("\nCross-validation 5-fold...\n")
+ctrl <- trainControl(method = "cv", number = 5,
+                     classProbs = FALSE, savePredictions = "final")
+cv_rf <- train(
+  formula_rf,
+  data      = df_clean,
+  method    = "rf",
+  trControl = ctrl,
+  tuneGrid  = data.frame(mtry = floor(sqrt(length(predictoras)))),
+  ntree     = 200   # algo menor para acelerar el CV
+)
+cat(sprintf("CV accuracy: %.4f +/- %.4f\n",
+            cv_rf$results$Accuracy, cv_rf$results$AccuracySD))
+```
+
+```{r Importancia de variables }
+imp_df <- data.frame(
+  feature    = rownames(importance(rf_modelo)),
+  importance = importance(rf_modelo)[, "MeanDecreaseGini"]
+) %>% arrange(desc(importance))
+cat("\n=== Top 12 variables mas importantes ===\n")
+print(head(imp_df, 12))
+```
+
+
+```{r Graficos con ggplot2 }
+# Matriz de confusion
+cm_df <- as.data.frame(cm$table)
+colnames(cm_df) <- c("Predicho", "Real", "Frecuencia")
+g_cm <- ggplot(cm_df, aes(x = Predicho, y = Real, fill = Frecuencia)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = Frecuencia), size = 5) +
+  scale_fill_gradient(low = "white", high = "#2E75B6") +
+  labs(title = "Matriz de confusion - Random Forest",
+       x = "Predicho", y = "Real") +
+  theme_minimal(base_size = 11) +
+  theme(axis.text.x = element_text(angle = 20, hjust = 1))
+print(g_cm)
+ 
+# Feature importance (top 15)
+top_imp <- head(imp_df, 15)
+
+g_imp <- ggplot(top_imp, aes(x = reorder(feature, importance), 
+                              y = importance, 
+                              fill = importance)) +  
+  geom_col() +
+  geom_text(aes(label = sprintf("%.1f", importance)),  
+            hjust = -0.15, size = 3.5) +
+  coord_flip() +
+  scale_fill_viridis_c(option = "viridis") +           
+  scale_y_continuous(expand = expansion(mult = c(0, 0.15))) +
+  labs(title = "Top 15 variables mas importantes - Random Forest",
+       x = NULL, y = "Importancia (Mean Decrease Gini)") +
+  theme_minimal(base_size = 11) +
+  theme(legend.position = "none")                      
+print(g_imp)
+
+
+#  Comparacion baseline vs modelo
+comp_df <- data.frame(
+  Modelo   = factor(c("Baseline\n(clase mayoritaria)",
+                      "Random Forest\n(test)",
+                      "Random Forest\n(CV 5-fold)"),
+                    levels = c("Baseline\n(clase mayoritaria)",
+                               "Random Forest\n(test)",
+                               "Random Forest\n(CV 5-fold)")),
+  Accuracy = c(acc_baseline, acc_test, cv_rf$results$Accuracy),
+  err      = c(0, 0, cv_rf$results$AccuracySD)
+)
+g_comp <- ggplot(comp_df, aes(x = Modelo, y = Accuracy, fill = Modelo)) +
+  geom_col(color = "black") +
+  geom_errorbar(aes(ymin = Accuracy - err, ymax = Accuracy + err),
+                width = 0.2) +
+  geom_text(aes(label = sprintf("%.4f", Accuracy)),
+            vjust = -0.8, size = 4) +
+  scale_fill_manual(values = c("#cccccc", "#2E86AB", "#A23B72")) +
+  labs(title = "Comparacion: baseline vs Random Forest",
+       y = "Accuracy", x = NULL) +
+  ylim(0, 0.75) +
+  theme_minimal(base_size = 11) +
+  theme(legend.position = "none")
+print(g_comp)
+```
+
