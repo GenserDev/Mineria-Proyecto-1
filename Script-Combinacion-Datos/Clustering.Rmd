@@ -91,9 +91,6 @@ cluster 1: Divorcios jóvenes.
 cluster 2: Divorcios con edad madura
 cluster 3: divorcios en edad madura.
 
-```{r silueta}
-plot(sil)
-```
 ```{r proporciones en los clusters}
 table(kmsil$cluster)
 ```

@@ -1,0 +1,61 @@
+---
+title: "particiones y balance"
+output: html_notebook
+---
+
+
+```{r carga de datos}
+tryCatch({
+  df <- read.csv("datos_combinados.csv")
+}, error = function(e) {
+  stop("No se encuentra el archivo. Verifica que 'datos_combinados.csv' esté en la misma carpeta que este script.")
+})
+```
+
+```{r paquetes}
+library(dplyr)
+library(caret)
+```
+
+```{r preparación de variable respuesta}
+df_limpio <- df %>%
+  # Quitar NA
+  filter(!is.na(escohom), !is.na(escomuj)) %>%
+  
+  # Quitar valores inválidos
+  filter(escohom != 9, escomuj != 9) %>%
+  
+  # Crear variable respuesta
+  mutate(
+    nivel_relacion = case_when(
+      escohom == escomuj ~ "Igual",
+      escohom > escomuj ~ "Esposo_mas_educado",
+      escohom < escomuj ~ "Esposa_mas_educada"
+    )
+  )
+```
+
+
+```{r verificar balance de variables}
+table(df_limpio$nivel_relacion)
+prop.table(table(df_limpio$nivel_relacion))
+```
+
+```{r separacion de datos}
+set.seed(123)
+datos <- df_limpio
+n <- nrow(datos)
+
+train_idx <- sample(1:n, size = 0.7 * n)
+
+train <- datos[train_idx, ]
+test  <- datos[-train_idx, ]
+```
+
+```{r verificar balance de variables en train/test}
+# Distribución en train
+prop.table(table(train$nivel_relacion))
+# Distribución en test
+prop.table(table(test$nivel_relacion))
+```
+La variable respuesta no está balanceada, ya que más del 70% de los datos pertenecen a la categoría "igual", sin embargo, los resultados son muy parecidos en train y test, por lo que la partición de los datos no alterará los resultados. Por otro lado, el gran desbalance entre los datos puede generar que los modelos de clasificación tengan un sesgo muy notorio hacia la clase "igual", por lo que es necesario revisar los resultados con precaución para darles una interpretación correcta.
