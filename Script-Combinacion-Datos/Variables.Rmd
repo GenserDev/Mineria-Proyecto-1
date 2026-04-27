@@ -41,33 +41,44 @@ df[df == 999] <- NA
 ## Resumen variables numéricas
 
 ```{r Numéricas}
-
 library(dplyr)
+
+# Esto hace que salgan 2 gráficas juntas (Izquierda: Histograma, Derecha: Boxplot)
+par(mfrow=c(1,2)) 
 
 for (var in vars_numericas) {
   
-  cat("====================================\n")
+  datos_limpios <- na.omit(df[[var]]) # Limpiamos NAs para evitar errores en gráficos
+
+  # --- TEXTO ---
+  cat("\n====================================\n")
   cat("Variable:", var, "\n")
   cat("====================================\n")
-  
   print(summary(df[[var]]))
+  cat("Desviación estándar:", round(sd(df[[var]], na.rm = TRUE), 2), "\n")
   
-  cat("\nDesviación estándar:\n")
-  print(sd(df[[var]], na.rm = TRUE))
   
-  hist(df[[var]],
-       main = paste("Histograma de", var),
-       xlab = var)
+  hist(df[[var]], 
+       main = paste("Hist:", var), 
+       xlab = var, 
+       col = "#2C7FB8", border = "white")
   
-  datos <- na.omit(df[[var]])
   
-  if(length(datos) > 3 && length(datos) < 5000){
+  boxplot(df[[var]], 
+          main = paste("Outliers:", var), 
+          col = "#7FCDBB", 
+          pch = 19) # pch cambia el puntito del outlier
+  
+  # --- TEST DE NORMALIDAD ---
+  if(length(datos_limpios) > 3 && length(datos_limpios) < 5000){
     cat("\nShapiro-Wilk Test:\n")
-    print(shapiro.test(datos))
+    print(shapiro.test(datos_limpios))
   }
-  
   cat("\n\n")
 }
+
+
+par(mfrow=c(1,1))
 
 ```
 
