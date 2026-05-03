@@ -4,6 +4,8 @@ output: html_document
 date: "2026-04-27"
 ---
 
+# Setup y carga de paquetes
+
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 library(dplyr)
@@ -12,17 +14,23 @@ library(randomForest)
 library(caret)
 library(ggplot2)
 library(tidyr)
+library(e1071)    # SVM
+library(class)    # KNN
 ```
 
 ```{r}
 set.seed(42)
-
 ```
+
+# Carga y preprocesamiento de datos
 
 ```{r}
 df <- read_csv("datos_combinados.csv", show_col_types = FALSE)
 cat("Filas originales:", nrow(df), " | Columnas:", ncol(df), "\n")
 ```
+
+## Unificacion de columnas duplicadas (mayusculas/minusculas)
+
 ```{r}
 upper_cols <- c("DEPREG","MUPREG","MESREG","AÑOREG","DIAOCU","MESOCU","AÑOOCU",
                 "DEPOCU","MUPOCU","EDADHOM","EDADMUJ","PPERHOM","PPERMUJ",
@@ -30,7 +38,7 @@ upper_cols <- c("DEPREG","MUPREG","MESREG","AÑOREG","DIAOCU","MESOCU","AÑOOCU"
 lower_cols <- c("depreg","mupreg","mesreg","añoreg","diaocu","mesocu","añoocu",
                 "depocu","mupocu","edadhom","edadmuj","grethom","gretmuj",
                 "nachom","nacmuj","escohom","escomuj","ocupahom","ocupamuj")
- 
+
 for (i in seq_along(upper_cols)) {
   l <- lower_cols[i]; u <- upper_cols[i]
   df[[l]] <- ifelse(is.na(df[[l]]), df[[u]], df[[l]])
@@ -39,10 +47,9 @@ df <- df %>% select(all_of(c(lower_cols, "año del dato")))
 cat("Despues de unificar:", nrow(df), "x", ncol(df), "\n")
 ```
 
+## Filtrado de codigos especiales (999 en edades, 9 en educacion)
+
 ```{r}
-# Edades: 999 es codigo de "ignorado"; aplicamos rangos validos.
-# Educacion: 9 es "ignorado". Como la variable respuesta se construye desde
-# escohom/escomuj, mantener 9 introducira clasificaciones ficticias.
 df_clean <- df %>%
   filter(edadhom < 100, edadmuj < 100,
          edadhom >= 18, edadmuj >= 14,
@@ -50,7 +57,9 @@ df_clean <- df %>%
 cat("Despues de filtrado:", nrow(df_clean), "registros\n")
 ```
 
-```{r Variables de respuesta}
+## Construccion de la variable respuesta
+
+```{r}
 df_clean <- df_clean %>%
   mutate(nivel_edu_pareja = case_when(
     escohom == escomuj ~ "Educacion_similar",
@@ -58,13 +67,16 @@ df_clean <- df_clean %>%
     escohom <  escomuj ~ "Esposa_mas_educada"
   ),
   nivel_edu_pareja = factor(nivel_edu_pareja))
- 
+
 cat("\nDistribucion de la variable respuesta:\n")
 print(table(df_clean$nivel_edu_pareja))
 cat("\nPorcentajes:\n")
 print(round(prop.table(table(df_clean$nivel_edu_pareja)) * 100, 2))
 ```
-```{r Ingenería de estadísticas}
+
+## Ingenieria de caracteristicas
+
+```{r}
 df_clean <- df_clean %>%
   mutate(
     dif_edad     = edadhom - edadmuj,
@@ -76,7 +88,11 @@ df_clean <- df_clean %>%
   )
 ```
 
-```{r Seleccion de predictoras (sin data leakage)}
+## Seleccion de predictoras (sin data leakage)
+
+```{r}
+# Importante: escohom y escomuj NO se incluyen porque la variable respuesta
+# se construye directamente de su comparacion.
 features_num <- c("edadhom","edadmuj","dif_edad","dif_edad_abs","edad_prom",
                   "esposo_mayor","edad_min","edad_max",
                   "mesreg","mesocu","diaocu","añoreg","añoocu","año del dato")
@@ -84,7 +100,9 @@ features_cat <- c("depreg","depocu","grethom","gretmuj",
                   "nachom","nacmuj","ocupahom","ocupamuj")
 ```
 
-```{r Tratamiento de NAs y conversion a factor}
+## Tratamiento de NAs y conversion a factor
+
+```{r}
 for (col in features_cat) {
   df_clean[[col]] <- as.character(df_clean[[col]])
   df_clean[[col]][is.na(df_clean[[col]])] <- "desconocido"
@@ -95,10 +113,8 @@ for (col in features_num) {
     df_clean[[col]][is.na(df_clean[[col]])] <- median(df_clean[[col]], na.rm = TRUE)
   }
 }
- 
-# randomForest tiene un limite de 53 niveles por factor. Para variables con
-# muchas categorias (ocupahom, mupocu, mupreg) agrupamos las menos frecuentes
-# en "Otros". Nos quedamos con las top 50 mas frecuentes por variable.
+
+# randomForest tiene un limite de 53 niveles por factor.
 collapse_levels <- function(x, top_n = 50) {
   freqs <- sort(table(x), decreasing = TRUE)
   keep  <- names(freqs)[seq_len(min(top_n, length(freqs)))]
@@ -111,103 +127,145 @@ for (col in features_cat) {
     df_clean[[col]] <- collapse_levels(df_clean[[col]], top_n = 50)
   }
 }
- 
-# Renombrar la columna con espacio porque randomForest no la acepta
+
+# Renombrar columnas con caracteres especiales
 df_clean <- df_clean %>% rename(ano_dato = `año del dato`,
                                 anoreg   = `añoreg`,
                                 anoocu   = `añoocu`)
 features_num <- gsub("año del dato", "ano_dato", features_num)
 features_num <- gsub("añoreg", "anoreg", features_num)
 features_num <- gsub("añoocu", "anoocu", features_num)
- 
+
 predictoras <- c(features_num, features_cat)
 cat("\nNumero de predictoras:", length(predictoras), "\n")
 ```
 
-```{r Split train/test}
-idx <- createDataPartition(df_clean$nivel_edu_pareja, p = 0.8, list = FALSE)
+## Split train/test (70/30 estratificado)
+
+```{r}
+idx <- createDataPartition(df_clean$nivel_edu_pareja, p = 0.7, list = FALSE)
 train <- df_clean[idx, ]
 test  <- df_clean[-idx, ]
 cat("Train:", nrow(train), " | Test:", nrow(test), "\n")
- 
+
+cat("\nDistribucion en train:\n")
+print(round(prop.table(table(train$nivel_edu_pareja)) * 100, 2))
+cat("\nDistribucion en test:\n")
+print(round(prop.table(table(test$nivel_edu_pareja)) * 100, 2))
 ```
-```{r Balseline}
+
+## Baseline y pesos de clase
+
+```{r}
 clase_mayoritaria <- names(sort(table(train$nivel_edu_pareja), decreasing = TRUE))[1]
 acc_baseline <- mean(test$nivel_edu_pareja == clase_mayoritaria)
-cat(sprintf("\nBaseline (predecir siempre '%s'): %.4f\n",
+cat(sprintf("Baseline (predecir siempre '%s'): %.4f\n",
             clase_mayoritaria, acc_baseline))
- 
-```
-```{r Random Forest con class weights balanceados}
-# classwt compensa el desbalance: a la clase mayoritaria se le da menor peso.
+
+# classwt: pesos inversos a la frecuencia de cada clase
 freqs <- table(train$nivel_edu_pareja)
 classwt <- as.numeric(1 / freqs)
 classwt <- classwt / sum(classwt)
 names(classwt) <- names(freqs)
- 
+cat("\nPesos de clase (classwt):\n")
+print(round(classwt, 4))
+```
+
+---
+
+# ALGORITMO 1: Random Forest
+
+## RF - Generacion de modelos con grid search
+
+```{r RF tuning}
+# Grid search con 5-fold cross-validation sobre 5 valores de mtry.
+# Esto cubre los 3+ modelos requeridos por la rubrica.
+ctrl_tune <- trainControl(method = "cv", number = 5)
+
+grid_rf <- expand.grid(mtry = c(2, 5, 10, 15, 20))
+
 formula_rf <- as.formula(paste("nivel_edu_pareja ~",
                                paste(predictoras, collapse = " + ")))
- 
-cat("\nEntrenando Random Forest...\n")
-rf_modelo <- randomForest(
+
+cat("Entrenando 5 modelos Random Forest variando mtry...\n")
+rf_tuneado <- train(
+  formula_rf,
+  data      = train,
+  method    = "rf",
+  trControl = ctrl_tune,
+  tuneGrid  = grid_rf,
+  ntree     = 200
+)
+
+cat("\n=== Resultados de la busqueda de hiperparametros ===\n")
+print(rf_tuneado)
+
+cat("\nMejor mtry encontrado:", rf_tuneado$bestTune$mtry, "\n")
+```
+
+## RF - Visualizacion del tuning
+
+```{r RF tuning plot}
+ggplot(rf_tuneado) +
+  theme_minimal(base_size = 11) +
+  labs(title = "Rendimiento del Modelo segun el parametro 'mtry'",
+       x = "Cantidad de variables aleatorias por division (mtry)",
+       y = "Accuracy (Validacion Cruzada)")
+```
+
+## RF - Modelo final con el mejor mtry y classwt
+
+```{r RF modelo final}
+mejor_mtry <- rf_tuneado$bestTune$mtry
+
+rf_final <- randomForest(
   formula_rf,
   data       = train,
   ntree      = 300,
-  mtry       = floor(sqrt(length(predictoras))),  # ~5
+  mtry       = mejor_mtry,
   nodesize   = 5,
   classwt    = classwt,
   importance = TRUE
 )
-print(rf_modelo)
+print(rf_final)
 ```
 
-```{r  Evaluacion en test}
-pred_test  <- predict(rf_modelo, newdata = test)
-pred_train <- predict(rf_modelo, newdata = train)
-acc_train  <- mean(pred_train == train$nivel_edu_pareja)
-acc_test   <- mean(pred_test  == test$nivel_edu_pareja)
- 
-cat(sprintf("\nAccuracy train: %.4f\n", acc_train))
-cat(sprintf("Accuracy test:  %.4f\n", acc_test))
- 
-cm <- confusionMatrix(pred_test, test$nivel_edu_pareja)
+## RF - Prediccion y matriz de confusion
+
+```{r RF prediccion}
+pred_test_rf  <- predict(rf_final, newdata = test)
+pred_train_rf <- predict(rf_final, newdata = train)
+acc_train_rf  <- mean(pred_train_rf == train$nivel_edu_pareja)
+acc_test_rf   <- mean(pred_test_rf  == test$nivel_edu_pareja)
+
+cat(sprintf("Accuracy train: %.4f\n", acc_train_rf))
+cat(sprintf("Accuracy test:  %.4f\n", acc_test_rf))
+
+cm_rf <- confusionMatrix(pred_test_rf, test$nivel_edu_pareja)
 cat("\n=== Matriz de confusion (test) ===\n")
-print(cm$table)
+print(cm_rf$table)
 cat("\n=== Metricas por clase ===\n")
-print(round(cm$byClass[, c("Precision","Recall","F1")], 4))
-```
-```{r Validacion cruzada 5-fold}
-
-cat("\nCross-validation 5-fold...\n")
-ctrl <- trainControl(method = "cv", number = 5,
-                     classProbs = FALSE, savePredictions = "final")
-cv_rf <- train(
-  formula_rf,
-  data      = df_clean,
-  method    = "rf",
-  trControl = ctrl,
-  tuneGrid  = data.frame(mtry = floor(sqrt(length(predictoras)))),
-  ntree     = 200   # algo menor para acelerar el CV
-)
-cat(sprintf("CV accuracy: %.4f +/- %.4f\n",
-            cv_rf$results$Accuracy, cv_rf$results$AccuracySD))
+print(round(cm_rf$byClass[, c("Precision","Recall","F1")], 4))
 ```
 
-```{r Importancia de variables }
+## RF - Importancia de variables
+
+```{r RF importancia}
 imp_df <- data.frame(
-  feature    = rownames(importance(rf_modelo)),
-  importance = importance(rf_modelo)[, "MeanDecreaseGini"]
+  feature    = rownames(importance(rf_final)),
+  importance = importance(rf_final)[, "MeanDecreaseGini"]
 ) %>% arrange(desc(importance))
-cat("\n=== Top 12 variables mas importantes ===\n")
+cat("=== Top 12 variables mas importantes ===\n")
 print(head(imp_df, 12))
 ```
 
+## RF - Graficos
 
-```{r Graficos con ggplot2 }
+```{r RF graficos}
 # Matriz de confusion
-cm_df <- as.data.frame(cm$table)
+cm_df <- as.data.frame(cm_rf$table)
 colnames(cm_df) <- c("Predicho", "Real", "Frecuencia")
-g_cm <- ggplot(cm_df, aes(x = Predicho, y = Real, fill = Frecuencia)) +
+g_cm_rf <- ggplot(cm_df, aes(x = Predicho, y = Real, fill = Frecuencia)) +
   geom_tile(color = "white") +
   geom_text(aes(label = Frecuencia), size = 5) +
   scale_fill_gradient(low = "white", high = "#2E75B6") +
@@ -215,86 +273,324 @@ g_cm <- ggplot(cm_df, aes(x = Predicho, y = Real, fill = Frecuencia)) +
        x = "Predicho", y = "Real") +
   theme_minimal(base_size = 11) +
   theme(axis.text.x = element_text(angle = 20, hjust = 1))
-print(g_cm)
- 
-# Feature importance (top 15)
-top_imp <- head(imp_df, 15)
+print(g_cm_rf)
 
-g_imp <- ggplot(top_imp, aes(x = reorder(feature, importance), 
-                              y = importance, 
-                              fill = importance)) +  
+# Top 15 variables mas importantes
+top_imp <- head(imp_df, 15)
+g_imp <- ggplot(top_imp, aes(x = reorder(feature, importance),
+                              y = importance,
+                              fill = importance)) +
   geom_col() +
-  geom_text(aes(label = sprintf("%.1f", importance)),  
+  geom_text(aes(label = sprintf("%.1f", importance)),
             hjust = -0.15, size = 3.5) +
   coord_flip() +
-  scale_fill_viridis_c(option = "viridis") +           
+  scale_fill_viridis_c(option = "viridis") +
   scale_y_continuous(expand = expansion(mult = c(0, 0.15))) +
   labs(title = "Top 15 variables mas importantes - Random Forest",
        x = NULL, y = "Importancia (Mean Decrease Gini)") +
   theme_minimal(base_size = 11) +
-  theme(legend.position = "none")                      
+  theme(legend.position = "none")
 print(g_imp)
+```
 
+## RF - Revision del ajuste
 
-#  Comparacion baseline vs modelo
-comp_df <- data.frame(
-  Modelo   = factor(c("Baseline\n(clase mayoritaria)",
-                      "Random Forest\n(test)",
-                      "Random Forest\n(CV 5-fold)"),
-                    levels = c("Baseline\n(clase mayoritaria)",
-                               "Random Forest\n(test)",
-                               "Random Forest\n(CV 5-fold)")),
-  Accuracy = c(acc_baseline, acc_test, cv_rf$results$Accuracy),
-  err      = c(0, 0, cv_rf$results$AccuracySD)
+```{r RF ajuste}
+cat(sprintf("Accuracy train: %.4f\n", acc_train_rf))
+cat(sprintf("Accuracy test:  %.4f\n", acc_test_rf))
+cat(sprintf("Diferencia (gap): %.4f\n", acc_train_rf - acc_test_rf))
+
+if ((acc_train_rf - acc_test_rf) > 0.20) {
+  cat("\nDiagnostico: hay un gap importante entre train y test, lo que sugiere overfitting parcial.\n")
+} else if (acc_test_rf < acc_baseline + 0.02) {
+  cat("\nDiagnostico: el modelo apenas supera al baseline, posible underfitting.\n")
+} else {
+  cat("\nDiagnostico: ajuste razonable, supera el baseline y la diferencia train/test es controlada.\n")
+}
+```
+
+---
+
+# ALGORITMO 2: Support Vector Machine (SVM)
+
+## SVM - Setup (escalado de variables)
+
+```{r SVM setup}
+# SVM es sensible a la escala de las variables, por eso se estandarizan.
+# Usamos solo las variables numericas porque SVM no maneja factores con muchos
+# niveles tan bien como Random Forest.
+features_num_svm <- c("edadhom","edadmuj","dif_edad","dif_edad_abs","edad_prom",
+                      "esposo_mayor","edad_min","edad_max",
+                      "mesreg","mesocu","diaocu","anoreg","anoocu","ano_dato")
+
+train_svm <- train
+test_svm  <- test
+
+# Escalar variables numericas
+preProcValues <- preProcess(train_svm[, features_num_svm], method = c("center", "scale"))
+train_svm[, features_num_svm] <- predict(preProcValues, train_svm[, features_num_svm])
+test_svm[,  features_num_svm] <- predict(preProcValues, test_svm[,  features_num_svm])
+
+# Reemplazar NaN/Inf que aparecen cuando una columna tiene varianza = 0
+for (col in features_num_svm) {
+  train_svm[[col]][is.nan(train_svm[[col]]) | is.infinite(train_svm[[col]])] <- 0
+  test_svm[[col]][is.nan(test_svm[[col]])   | is.infinite(test_svm[[col]])]  <- 0
+}
+
+formula_svm <- as.formula(paste("nivel_edu_pareja ~",
+                                paste(features_num_svm, collapse = " + ")))
+
+# gamma equivalente al "scale" de sklearn: 1 / num_features
+gamma_default <- 1 / length(features_num_svm)
+
+cat("NAs en train_svm:", sum(is.na(train_svm[, features_num_svm])), "\n")
+cat("NAs en test_svm: ", sum(is.na(test_svm[,  features_num_svm])), "\n")
+cat("gamma por defecto:", round(gamma_default, 4), "\n")
+cat("Datos listos para SVM\n")
+```
+
+## SVM - Modelo 1: Kernel lineal, C=1
+
+```{r SVM m1}
+# Kernel lineal: asume que las clases son separables por hiperplanos rectos.
+cat("Entrenando SVM Modelo 1: kernel lineal, C=1...\n")
+svm_m1 <- svm(formula_svm, data = train_svm,
+              kernel = "linear", cost = 1,
+              class.weights = classwt, probability = FALSE)
+
+pred_svm1 <- predict(svm_m1, newdata = test_svm)
+acc_svm1  <- mean(pred_svm1 == test_svm$nivel_edu_pareja)
+cm_svm1   <- confusionMatrix(pred_svm1, test_svm$nivel_edu_pareja)
+
+cat(sprintf("\nSVM M1 (lineal, C=1) -> Accuracy test: %.4f\n", acc_svm1))
+print(cm_svm1$table)
+```
+
+## SVM - Modelo 2: Kernel RBF, C=1
+
+```{r SVM m2}
+# Kernel RBF (radial): captura relaciones no lineales entre variables.
+cat("Entrenando SVM Modelo 2: kernel RBF, C=1...\n")
+svm_m2 <- svm(formula_svm, data = train_svm,
+              kernel = "radial", cost = 1, gamma = gamma_default,
+              class.weights = classwt, probability = FALSE)
+
+pred_svm2 <- predict(svm_m2, newdata = test_svm)
+acc_svm2  <- mean(pred_svm2 == test_svm$nivel_edu_pareja)
+cm_svm2   <- confusionMatrix(pred_svm2, test_svm$nivel_edu_pareja)
+
+cat(sprintf("\nSVM M2 (RBF, C=1) -> Accuracy test: %.4f\n", acc_svm2))
+print(cm_svm2$table)
+```
+
+## SVM - Modelo 3: Kernel RBF, C=10
+
+```{r SVM m3}
+# C alto reduce el margen y permite mayor complejidad de la frontera.
+# Riesgo de overfitting si C es excesivo.
+cat("Entrenando SVM Modelo 3: kernel RBF, C=10...\n")
+svm_m3 <- svm(formula_svm, data = train_svm,
+              kernel = "radial", cost = 10, gamma = gamma_default,
+              class.weights = classwt, probability = FALSE)
+
+pred_svm3 <- predict(svm_m3, newdata = test_svm)
+acc_svm3  <- mean(pred_svm3 == test_svm$nivel_edu_pareja)
+cm_svm3   <- confusionMatrix(pred_svm3, test_svm$nivel_edu_pareja)
+
+cat(sprintf("\nSVM M3 (RBF, C=10) -> Accuracy test: %.4f\n", acc_svm3))
+print(cm_svm3$table)
+```
+
+## SVM - Comparacion y seleccion del mejor modelo
+
+```{r SVM comparacion}
+svm_resultados <- data.frame(
+  Modelo   = c("Lineal (C=1)", "RBF (C=1)", "RBF (C=10)"),
+  Accuracy = c(acc_svm1, acc_svm2, acc_svm3)
 )
-g_comp <- ggplot(comp_df, aes(x = Modelo, y = Accuracy, fill = Modelo)) +
+print(svm_resultados)
+
+mejor_svm_idx <- which.max(svm_resultados$Accuracy)
+cat(sprintf("\nMejor modelo SVM: %s con Accuracy = %.4f\n",
+            svm_resultados$Modelo[mejor_svm_idx],
+            svm_resultados$Accuracy[mejor_svm_idx]))
+
+# Metricas detalladas del mejor SVM
+mejor_svm_pred <- list(pred_svm1, pred_svm2, pred_svm3)[[mejor_svm_idx]]
+cm_mejor_svm   <- confusionMatrix(mejor_svm_pred, test_svm$nivel_edu_pareja)
+cat("\n=== Metricas por clase (mejor SVM) ===\n")
+print(round(cm_mejor_svm$byClass[, c("Precision","Recall","F1")], 4))
+
+# Grafico comparativo
+g_svm_comp <- ggplot(svm_resultados, aes(x = Modelo, y = Accuracy, fill = Modelo)) +
   geom_col(color = "black") +
-  geom_errorbar(aes(ymin = Accuracy - err, ymax = Accuracy + err),
-                width = 0.2) +
-  geom_text(aes(label = sprintf("%.4f", Accuracy)),
-            vjust = -0.8, size = 4) +
-  scale_fill_manual(values = c("#cccccc", "#2E86AB", "#A23B72")) +
-  labs(title = "Comparacion: baseline vs Random Forest",
-       y = "Accuracy", x = NULL) +
+  geom_text(aes(label = sprintf("%.4f", Accuracy)), vjust = -0.6, size = 4) +
+  scale_fill_manual(values = c("#4ECDC4", "#45B7D1", "#1A535C")) +
+  labs(title = "Comparacion de modelos SVM", y = "Accuracy", x = NULL) +
   ylim(0, 0.75) +
   theme_minimal(base_size = 11) +
   theme(legend.position = "none")
-print(g_comp)
+print(g_svm_comp)
+
+# Matriz de confusion del mejor SVM
+cm_svm_df <- as.data.frame(cm_mejor_svm$table)
+colnames(cm_svm_df) <- c("Predicho", "Real", "Frecuencia")
+g_cm_svm <- ggplot(cm_svm_df, aes(x = Predicho, y = Real, fill = Frecuencia)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = Frecuencia), size = 5) +
+  scale_fill_gradient(low = "white", high = "#45B7D1") +
+  labs(title = paste("Matriz de confusion - Mejor SVM:", svm_resultados$Modelo[mejor_svm_idx]),
+       x = "Predicho", y = "Real") +
+  theme_minimal(base_size = 11) +
+  theme(axis.text.x = element_text(angle = 20, hjust = 1))
+print(g_cm_svm)
 ```
 
-```{r inciso 4}
-# 1. Definir el control de entrenamiento (Validación Cruzada 5-fold)
-ctrl_tune <- trainControl(method = "cv", number = 5)
+---
 
-# 2. Crear la rejilla de parámetros (Grid Search)
+# ALGORITMO 3: K-Nearest Neighbors (KNN)
 
-grid_rf <- expand.grid(mtry = c(2, 5, 10, 15, 20))
+## KNN - Setup
 
-cat("\nEntrenando multiples modelos Random Forest para encontrar el mejor ajuste...\n")
+```{r KNN setup}
+# KNN tambien necesita variables numericas escaladas. Reutilizamos los datos
+# ya escalados de SVM. KNN no acepta factores como predictoras.
+X_train_knn <- train_svm[, features_num_svm]
+X_test_knn  <- test_svm[,  features_num_svm]
+y_train_knn <- train_svm$nivel_edu_pareja
+y_test_knn  <- test_svm$nivel_edu_pareja
 
-# 3. Entrenar los modelos
+cat("Dimensiones para KNN:\n")
+cat("Train:", nrow(X_train_knn), "x", ncol(X_train_knn), "\n")
+cat("Test: ", nrow(X_test_knn),  "x", ncol(X_test_knn),  "\n")
+```
 
-rf_tuneado <- train(
-  formula_rf,
-  data      = train, 
-  method    = "rf",
-  trControl = ctrl_tune,
-  tuneGrid  = grid_rf,
-  ntree     = 200 
+## KNN - Modelo 1: k=5
+
+```{r KNN m1}
+# k pequeno: modelo mas complejo, mas sensible al ruido.
+pred_knn1 <- knn(train = X_train_knn, test = X_test_knn,
+                 cl = y_train_knn, k = 5)
+acc_knn1 <- mean(pred_knn1 == y_test_knn)
+cm_knn1  <- confusionMatrix(pred_knn1, y_test_knn)
+
+cat(sprintf("KNN M1 (k=5) -> Accuracy test: %.4f\n", acc_knn1))
+print(cm_knn1$table)
+```
+
+## KNN - Modelo 2: k=15
+
+```{r KNN m2}
+# k intermedio: balance entre sensibilidad y generalizacion.
+pred_knn2 <- knn(train = X_train_knn, test = X_test_knn,
+                 cl = y_train_knn, k = 15)
+acc_knn2 <- mean(pred_knn2 == y_test_knn)
+cm_knn2  <- confusionMatrix(pred_knn2, y_test_knn)
+
+cat(sprintf("KNN M2 (k=15) -> Accuracy test: %.4f\n", acc_knn2))
+print(cm_knn2$table)
+```
+
+## KNN - Modelo 3: k=31
+
+```{r KNN m3}
+# k grande: decision mas suave. Riesgo de underfitting.
+# Se usa k impar para evitar empates en clasificacion multiclase.
+pred_knn3 <- knn(train = X_train_knn, test = X_test_knn,
+                 cl = y_train_knn, k = 31)
+acc_knn3 <- mean(pred_knn3 == y_test_knn)
+cm_knn3  <- confusionMatrix(pred_knn3, y_test_knn)
+
+cat(sprintf("KNN M3 (k=31) -> Accuracy test: %.4f\n", acc_knn3))
+print(cm_knn3$table)
+```
+
+## KNN - Comparacion y seleccion del mejor modelo
+
+```{r KNN comparacion}
+knn_resultados <- data.frame(
+  k        = c(5, 15, 31),
+  Accuracy = c(acc_knn1, acc_knn2, acc_knn3)
+)
+print(knn_resultados)
+
+mejor_knn_idx <- which.max(knn_resultados$Accuracy)
+cat(sprintf("\nMejor modelo KNN: k=%d con Accuracy = %.4f\n",
+            knn_resultados$k[mejor_knn_idx],
+            knn_resultados$Accuracy[mejor_knn_idx]))
+
+# Metricas detalladas del mejor KNN
+mejor_knn_pred <- list(pred_knn1, pred_knn2, pred_knn3)[[mejor_knn_idx]]
+cm_mejor_knn   <- confusionMatrix(mejor_knn_pred, y_test_knn)
+cat("\n=== Metricas por clase (mejor KNN) ===\n")
+print(round(cm_mejor_knn$byClass[, c("Precision","Recall","F1")], 4))
+
+# Grafico comparativo
+g_knn_comp <- ggplot(knn_resultados, aes(x = factor(k), y = Accuracy, fill = factor(k))) +
+  geom_col(color = "black") +
+  geom_text(aes(label = sprintf("%.4f", Accuracy)), vjust = -0.6, size = 4) +
+  scale_fill_manual(values = c("#F7DC6F", "#F39C12", "#D35400")) +
+  labs(title = "Comparacion de modelos KNN segun k",
+       y = "Accuracy", x = "Numero de vecinos (k)") +
+  ylim(0, 0.75) +
+  theme_minimal(base_size = 11) +
+  theme(legend.position = "none")
+print(g_knn_comp)
+
+# Matriz de confusion del mejor KNN
+cm_knn_df <- as.data.frame(cm_mejor_knn$table)
+colnames(cm_knn_df) <- c("Predicho", "Real", "Frecuencia")
+g_cm_knn <- ggplot(cm_knn_df, aes(x = Predicho, y = Real, fill = Frecuencia)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = Frecuencia), size = 5) +
+  scale_fill_gradient(low = "white", high = "#F39C12") +
+  labs(title = paste("Matriz de confusion - Mejor KNN: k =",
+                     knn_resultados$k[mejor_knn_idx]),
+       x = "Predicho", y = "Real") +
+  theme_minimal(base_size = 11) +
+  theme(axis.text.x = element_text(angle = 20, hjust = 1))
+print(g_cm_knn)
+```
+
+---
+
+# Comparacion final entre los tres algoritmos
+
+```{r comparacion final}
+mejor_svm_acc <- max(c(acc_svm1, acc_svm2, acc_svm3))
+mejor_knn_acc <- max(c(acc_knn1, acc_knn2, acc_knn3))
+
+resumen_final <- data.frame(
+  Algoritmo = c(paste0("Random Forest\n(mtry=", mejor_mtry, ")"),
+                paste0("SVM\n(", svm_resultados$Modelo[mejor_svm_idx], ")"),
+                paste0("KNN\n(k=", knn_resultados$k[mejor_knn_idx], ")")),
+  Accuracy  = c(acc_test_rf, mejor_svm_acc, mejor_knn_acc)
 )
 
-# 4. Mostrar los resultados de los 5 modelos
-cat("\n=== Resultados de la Búsqueda del Mejor Modelo ===\n")
-print(rf_tuneado)
+cat("=== RESUMEN FINAL ===\n")
+print(resumen_final)
+cat(sprintf("\nBaseline: %.4f\n", acc_baseline))
 
-# 5. Gráfica para justificar la elección (Complejidad vs Accuracy)
-ggplot(rf_tuneado) + 
+g_final <- ggplot(resumen_final, aes(x = Algoritmo, y = Accuracy, fill = Algoritmo)) +
+  geom_col(color = "black") +
+  geom_hline(yintercept = acc_baseline, linetype = "dashed",
+             color = "gray50", linewidth = 0.8) +
+  annotate("text", x = 0.6, y = acc_baseline + 0.015,
+           label = paste0("Baseline: ", round(acc_baseline, 4)),
+           hjust = 0, size = 3.5, color = "gray40") +
+  geom_text(aes(label = sprintf("%.4f", Accuracy)), vjust = -0.6, size = 4) +
+  scale_fill_manual(values = c("#2E86AB", "#45B7D1", "#F39C12")) +
+  labs(title = "Comparacion final: mejor modelo de cada algoritmo",
+       y = "Accuracy (conjunto de prueba)", x = NULL) +
+  ylim(0, 0.80) +
   theme_minimal(base_size = 11) +
-  labs(title = "Rendimiento del Modelo según el parámetro 'mtry'",
-       x = "Cantidad de variables aleatorias por división (mtry)",
-       y = "Accuracy (Precisión en Validación Cruzada)")
+  theme(legend.position = "none")
+print(g_final)
 
-# 6. Extraer el mejor modelo final
-modelo_final <- rf_tuneado$finalModel
-cat("\nEl mejor parámetro encontrado fue mtry =", rf_tuneado$bestTune$mtry, "\n")
+mejor_global_idx <- which.max(resumen_final$Accuracy)
+mejor_global     <- gsub("\n", " ", resumen_final$Algoritmo[mejor_global_idx])
+cat(sprintf("\nMejor algoritmo global: %s con Accuracy = %.4f\n",
+            mejor_global, max(resumen_final$Accuracy)))
+cat(sprintf("Mejora sobre baseline: %.2f puntos porcentuales\n",
+            (max(resumen_final$Accuracy) - acc_baseline) * 100))
 ```
